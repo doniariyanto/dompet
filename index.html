@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dompetku - Manajemen Keuangan Premium</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome (Diganti ke Cloudflare CDN yang super stabil untuk sisa ikon di tabel) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    
+    <!-- Google Fonts: Plus Jakarta Sans untuk kesan lebih modern/premium -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Konfigurasi Tailwind Custom -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            500: '#8b5cf6', // Violet
+                            600: '#7c3aed',
+                        },
+                        appBg: '#09090b',    // Zinc 950
+                        surface: '#18181b',  // Zinc 900
+                        surfaceLight: '#27272a', // Zinc 800
+                        border: '#3f3f46',   // Zinc 700
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.4s ease-out forwards',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #09090b; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+        
+        /* Glassmorphism Utilities */
+        .glass {
+            background: rgba(24, 24, 27, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .glass-card {
+            background: linear-gradient(145deg, rgba(39, 39, 42, 0.5) 0%, rgba(24, 24, 27, 0.8) 100%);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        /* Glowing Shadows */
+        .glow-brand { box-shadow: 0 0 20px -5px rgba(139, 92, 246, 0.4); }
+        .glow-emerald { box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.3); }
+        .glow-rose { box-shadow: 0 0 20px -5px rgba(244, 63, 94, 0.3); }
+        
+        /* Hide Arrows on Number Input */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        
+        /* Smooth Date Picker for Dark Mode */
+        ::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+            opacity: 0.5;
+            cursor: pointer;
+        }
+        ::-webkit-calendar-picker-indicator:hover {
+            opacity: 0.8;
+        }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Environment variables provided by Immersive environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'dompetku-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            // Provide dummy config for fallback testing if env variables are missing
+            projectId: "dummy-project"
+        };
+        
+        let app;
+        let db;
+        let auth;
+        let provider;
+        let unsubscribeTransactions = null;
+
+        try {
+             app = initializeApp(firebaseConfig);
+             db = getFirestore(app);
+             auth = getAuth(app);
+             provider = new GoogleAuthProvider();
+        } catch (error) {
+             console.error("Firebase init error (may occur if config is dummy):", error);
+        }
+
+        // Global state to be used by old functions (we attach to window object to expose them from the module)
+        window.firebaseDB = db;
+        window.firebaseAuth = auth;
+        window.appId = appId;
+        window.onSnapshot = onSnapshot;
+        window.collection = collection;
+        window.doc = doc;
+        window.addDoc = addDoc;
+        window.deleteDoc = deleteDoc;
+        window.signOutAuth = () => signOut(auth);
+
+        // Listen for Auth State Changes
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                console.log("User logged in:", user.uid);
+                window.currentUserId = user.uid;
+                
+                // Show Main App, Hide Auth Screen
+                document.getElementById('authScreen').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                
+                // Show User Info (Name and Photo)
+                const displayName = user.displayName || user.email.split('@')[0];
+                document.getElementById('userIdDisplay').textContent = displayName;
+                if(user.photoURL) {
+                    document.getElementById('userPhoto').src = user.photoURL;
+                }
+
+                // Setup real-time listener for THIS user's data
+                setupRealtimeListener();
+            } else {
+                console.log("No user logged in.");
+                window.currentUserId = null;
+                // Show Auth Screen, Hide Main App
+                document.getElementById('authScreen').classList.remove('hidden');
+                document.getElementById('mainApp').classList.add('hidden');
+                
+                // Reset login UI state
+                const btn = document.getElementById('btnGoogleLogin');
+                const btnDemo = document.getElementById('btnDemoLogin');
+                const loading = document.getElementById('loginLoading');
+                if(btn && loading) {
+                    btn.classList.remove('hidden');
+                    if(btnDemo) btnDemo.classList.remove('hidden');
+                    loading.classList.add('hidden');
+                    loading.classList.remove('flex');
+                }
+
+                // Clear old listener if exists
+                if(unsubscribeTransactions) {
+                    unsubscribeTransactions();
+                    unsubscribeTransactions = null;
+                }
+            }
+        });
+
+        window.loginWithGoogle = async () => {
+            const btn = document.getElementById('btnGoogleLogin');
+            const btnDemo = document.getElementById('btnDemoLogin');
+            const loading = document.getElementById('loginLoading');
+            
+            btn.classList.add('hidden');
+            if(btnDemo) btnDemo.classList.add('hidden');
+            loading.classList.remove('hidden');
+            loading.classList.add('flex');
+
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (error) {
+                // Tangani error jika di-hosting di GitHub (tanpa API Key atau Domain tidak terdaftar)
+                if (error.code === 'auth/unauthorized-domain' || error.code === 'auth/invalid-api-key' || error.message.includes('unauthorized-domain')) {
+                    console.warn("Koneksi Cloud ditolak (berjalan di GitHub/Lokal). Beralih ke Mode Demo...");
+                    
+                    // Tampilkan notifikasi lalu otomatis masukkan ke Mode Demo
+                    alert("Pemberitahuan: Anda sedang melihat versi Portofolio (GitHub Pages). Sistem akan otomatis menggunakan Mode Demo (Data disimpan di perangkat Anda).");
+                    window.startDemoMode();
+                } else {
+                    console.error("Login Error:", error);
+                    alert("Gagal login dengan Google. Pastikan popup tidak diblokir oleh browser Anda.");
+                    btn.classList.remove('hidden');
+                    if(btnDemo) btnDemo.classList.remove('hidden');
+                    loading.classList.add('hidden');
+                    loading.classList.remove('flex');
+                }
+            }
+        };
+
+        // Pisahkan fungsi Mode Demo agar bisa dipanggil langsung via tombol
+        window.startDemoMode = () => {
+            console.log("Menginisialisasi Mode Demo...");
+            
+            // Set user mock untuk bypass
+            window.currentUserId = "demo-guest";
+            
+            // Override Fungsi Firebase ke LocalStorage
+            window.addDoc = async (ref, data) => {
+                const trx = { ...data, id: Date.now().toString() };
+                let all = JSON.parse(localStorage.getItem('dompetku_demo_trx') || '[]');
+                all.push(trx);
+                localStorage.setItem('dompetku_demo_trx', JSON.stringify(all));
+                window._triggerMockSnapshot();
+            };
+            
+            window._demoDelete = (id) => {
+                let all = JSON.parse(localStorage.getItem('dompetku_demo_trx') || '[]');
+                all = all.filter(t => t.id !== id.toString());
+                localStorage.setItem('dompetku_demo_trx', JSON.stringify(all));
+                window._triggerMockSnapshot();
+            };
+
+            window._triggerMockSnapshot = () => {
+                let all = JSON.parse(localStorage.getItem('dompetku_demo_trx') || '[]');
+                all.sort((a, b) => b.createdAt - a.createdAt);
+                window.updateStateFromFirebase(all);
+            };
+
+            // Update UI untuk masuk sebagai Tamu
+            document.getElementById('authScreen').classList.add('hidden');
+            document.getElementById('mainApp').classList.remove('hidden');
+            document.getElementById('userIdDisplay').textContent = "Tamu (Mode Demo)";
+            document.getElementById('userPhoto').src = "https://ui-avatars.com/api/?name=Tamu&background=0ea5e9&color=fff";
+            
+            // Muat data demo saat ini
+            window._triggerMockSnapshot();
+        };
+
+        // Function to setup real-time listener from Firestore
+        function setupRealtimeListener() {
+            if (!window.currentUserId || !db) return;
+
+            const transactionsRef = collection(db, 'artifacts', appId, 'users', window.currentUserId, 'transactions');
+            
+            // Listen for changes
+            unsubscribeTransactions = onSnapshot(transactionsRef, (snapshot) => {
+                let fetchedTransactions = [];
+                snapshot.forEach((doc) => {
+                    fetchedTransactions.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // Sort descending by date (simulating unshift in original code)
+                // We sort here since we aren't using complex queries to abide by rules
+                fetchedTransactions.sort((a, b) => b.createdAt - a.createdAt);
+                
+                // Update Global State in original script
+                window.updateStateFromFirebase(fetchedTransactions);
+
+            }, (error) => {
+                console.error("Error listening to transactions: ", error);
+                window.showAppError("Gagal mengambil data dari server.");
+            });
+        }
+    </script>
+</head>
+<body class="bg-appBg text-zinc-200 font-sans antialiased min-h-screen selection:bg-brand-500 selection:text-white pb-12 overflow-x-hidden">
+
+    <!-- Background Ambient Glow -->
+    <div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-600/10 blur-[120px] pointer-events-none"></div>
+    <div class="fixed bottom-[-10%] right-[-10%] w-[30%] h-[30%] rounded-full bg-emerald-600/10 blur-[100px] pointer-events-none"></div>
+
+    <!-- Layar Auth (Ditampilkan jika belum login/sedang loading) -->
+    <div id="authScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-appBg/90 backdrop-blur-sm transition-opacity duration-500">
+        <div class="glass-card p-10 rounded-3xl max-w-sm w-full mx-4 flex flex-col items-center text-center">
+            <div class="w-20 h-20 rounded-3xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center text-white glow-brand mb-6 animate-pulse">
+                <i class="fa-solid fa-wallet text-4xl"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-white mb-2">Dompetku</h2>
+            <p class="text-zinc-400 text-sm mb-8">Masuk untuk menyimpan dan menyinkronkan data keuangan Anda secara aman.</p>
+            
+            <!-- Google Login Button -->
+            <button id="btnGoogleLogin" onclick="loginWithGoogle()" class="flex items-center gap-3 bg-white text-zinc-900 hover:bg-zinc-100 font-bold py-3.5 px-6 rounded-xl transition-all shadow-xl active:scale-95 w-full justify-center group">
+                <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" class="w-6 h-6 group-hover:scale-110 transition-transform">
+                Lanjutkan dengan Google
+            </button>
+
+            <!-- Demo Login Button -->
+            <button id="btnDemoLogin" onclick="startDemoMode()" class="mt-3 flex items-center gap-3 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white font-semibold py-3 px-6 rounded-xl transition-all border border-zinc-700 active:scale-95 w-full justify-center group">
+                <i class="fa-solid fa-user-astronaut"></i>
+                Gunakan Mode Demo (Lokal)
+            </button>
+            
+            <div id="loginLoading" class="hidden items-center justify-center gap-3 text-brand-400 mt-4 w-full bg-surfaceLight py-3.5 rounded-xl border border-zinc-700">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span class="text-sm font-medium">Autentikasi...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Kontainer Utama (Disembunyikan saat belum login) -->
+    <div id="mainApp" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 relative z-10 hidden">
+        
+        <!-- Header -->
+        <header class="flex items-center justify-between mb-10 animate-fade-in">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center text-white glow-brand">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400 tracking-tight">Dompetku</h1>
+                    <p class="text-xs text-zinc-500 font-medium tracking-wide uppercase">Financial Hub</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="hidden sm:flex flex-col items-end">
+                    <div class="flex items-center gap-2 text-sm text-zinc-400 glass px-5 py-2.5 rounded-full mb-1">
+                        <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <span id="currentDateDisplay" class="font-medium"></span>
+                    </div>
+                    <!-- User ID Display -->
+                    <div class="flex items-center gap-3 text-sm text-zinc-300 bg-surface px-3 py-1.5 rounded-full border border-zinc-800 shadow-sm">
+                        <img id="userPhoto" src="https://ui-avatars.com/api/?name=User&background=random" alt="Profile" class="w-7 h-7 rounded-full border border-zinc-700 object-cover">
+                        <span id="userIdDisplay" class="font-medium truncate max-w-[120px]">User</span>
+                        <button onclick="handleLogout()" class="ml-1 text-rose-400 hover:text-rose-300 transition-colors p-1 rounded-md hover:bg-rose-500/10" title="Keluar">
+                            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                        </button>
+                    </div>
+                </div>
+                <!-- Mobile Logout Button -->
+                <button onclick="handleLogout()" class="sm:hidden w-10 h-10 flex items-center justify-center rounded-full glass text-rose-400 hover:text-rose-300 transition-colors shadow-sm border border-rose-500/20">
+                     <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Kartu Ringkasan -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+            <!-- Saldo Card (Premium Design) -->
+            <div class="relative overflow-hidden rounded-3xl p-7 shadow-2xl group" style="background: linear-gradient(135deg, #18181b 0%, #09090b 100%); border: 1px solid rgba(139, 92, 246, 0.2);">
+                <!-- Premium card background effects -->
+                <div class="absolute top-0 right-0 w-32 h-32 bg-brand-500/20 rounded-full blur-2xl -mr-10 -mt-10 transition-transform duration-700 group-hover:scale-150"></div>
+                <div class="absolute bottom-0 left-0 w-24 h-24 bg-indigo-500/20 rounded-full blur-xl -ml-8 -mb-8"></div>
+                
+                <div class="relative z-10 flex flex-col h-full justify-between gap-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-zinc-400 text-sm font-semibold tracking-wide uppercase">Total Saldo</h3>
+                        <svg class="w-6 h-6 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                    </div>
+                    <div>
+                        <div class="text-4xl font-extrabold text-white mb-1 tracking-tight" id="totalBalance">Rp 0</div>
+                        <div class="flex items-center text-xs text-zinc-500 gap-2">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Real-time update
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pemasukan Card -->
+            <div class="glass-card rounded-3xl p-6 transition-all duration-300 hover:border-emerald-500/30 group">
+                <div class="flex justify-between items-start mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                    </div>
+                    <h3 class="text-zinc-400 text-sm font-medium">Pemasukan</h3>
+                </div>
+                <div class="text-2xl font-bold text-emerald-400 mb-1" id="totalIncome">Rp 0</div>
+                <p class="text-xs text-zinc-500">Total akumulasi dana masuk</p>
+            </div>
+
+            <!-- Pengeluaran Card -->
+            <div class="glass-card rounded-3xl p-6 transition-all duration-300 hover:border-rose-500/30 group">
+                <div class="flex justify-between items-start mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-400 group-hover:scale-110 transition-transform">
+                        <svg class="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"></path></svg>
+                    </div>
+                    <h3 class="text-zinc-400 text-sm font-medium">Pengeluaran</h3>
+                </div>
+                <div class="text-2xl font-bold text-rose-400 mb-1" id="totalExpense">Rp 0</div>
+                <p class="text-xs text-zinc-500">Total akumulasi dana keluar</p>
+            </div>
+        </div>
+
+        <!-- Main Layout: Form & Chart -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-10">
+            
+            <!-- Left: Form Tambah Transaksi (Col 5) -->
+            <div class="lg:col-span-5 glass-card rounded-3xl p-7">
+                <div class="flex items-center gap-3 mb-8">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-brand-400">
+                        <i class="fa-solid fa-plus"></i>
+                    </div>
+                    <h2 class="text-lg font-bold text-white">Transaksi Baru</h2>
+                </div>
+                
+                <!-- Pesan Error (Pengganti Alert) -->
+                <div id="errorMessage" class="hidden mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span id="errorText">Mohon lengkapi semua data.</span>
+                </div>
+
+                <form id="transactionForm" class="space-y-5">
+                    <!-- Tipe (Segmented Control) -->
+                    <div>
+                        <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Tipe Transaksi</label>
+                        <div class="grid grid-cols-2 gap-2 p-1 bg-zinc-900/80 rounded-xl border border-zinc-800">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="type" value="Pemasukan" class="peer sr-only" checked onchange="updateCategoryOptions()">
+                                <div class="text-center py-2.5 rounded-lg text-zinc-400 peer-checked:bg-surfaceLight peer-checked:text-emerald-400 peer-checked:shadow-sm transition-all text-sm font-semibold">
+                                    Pemasukan
+                                </div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="type" value="Pengeluaran" class="peer sr-only" onchange="updateCategoryOptions()">
+                                <div class="text-center py-2.5 rounded-lg text-zinc-400 peer-checked:bg-surfaceLight peer-checked:text-rose-400 peer-checked:shadow-sm transition-all text-sm font-semibold">
+                                    Pengeluaran
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Nominal -->
+                    <div>
+                        <label for="amount" class="block text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Nominal</label>
+                        <div class="relative group">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <span class="text-zinc-400 font-medium group-focus-within:text-brand-400 transition-colors">Rp</span>
+                            </div>
+                            <!-- UBAH DISINI: type="number" diganti menjadi type="text" agar bisa menampilkan format titik -->
+                            <input type="text" id="amount" placeholder="0" class="w-full bg-zinc-900/50 border border-zinc-700 text-white rounded-xl pl-12 pr-4 py-3 focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 outline-none transition-all text-base font-medium placeholder-zinc-600">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Kategori -->
+                        <div>
+                            <label for="category" class="block text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Kategori</label>
+                            <div class="relative">
+                                <select id="category" class="w-full bg-zinc-900/50 border border-zinc-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 outline-none appearance-none transition-all text-sm cursor-pointer font-medium">
+                                    <!-- Opsi diisi oleh JS -->
+                                </select>
+                                <div class="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-zinc-500">
+                                    <i class="fa-solid fa-chevron-down text-xs"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tanggal -->
+                        <div>
+                            <label for="date" class="block text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Tanggal</label>
+                            <input type="date" id="date" class="w-full bg-zinc-900/50 border border-zinc-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 outline-none transition-all text-sm font-medium [color-scheme:dark]">
+                        </div>
+                    </div>
+
+                    <!-- Catatan -->
+                    <div>
+                        <label for="note" class="block text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Keterangan</label>
+                        <input type="text" id="note" placeholder="Cth: Gaji bulanan, Kopi..." class="w-full bg-zinc-900/50 border border-zinc-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 outline-none transition-all text-sm font-medium placeholder-zinc-600">
+                    </div>
+
+                    <button type="submit" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl py-3.5 transition-all shadow-lg glow-brand mt-6 text-sm flex items-center justify-center gap-2 group active:scale-[0.98]">
+                        <i class="fa-solid fa-paper-plane group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform"></i>
+                        Simpan Transaksi
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right: Chart Pengeluaran (Col 7) -->
+            <div class="lg:col-span-7 glass-card rounded-3xl p-7 flex flex-col">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-pink-400">
+                        <i class="fa-solid fa-chart-pie"></i>
+                    </div>
+                    <h2 class="text-lg font-bold text-white">Analisis Pengeluaran</h2>
+                </div>
+                
+                <div class="flex-grow flex items-center justify-center relative min-h-[300px]">
+                    <!-- Canvas Chart -->
+                    <div class="w-full max-w-[450px] aspect-square relative z-10">
+                        <canvas id="expenseChart"></canvas>
+                    </div>
+                    <!-- Empty State Chart -->
+                    <div id="chartEmptyState" class="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 hidden bg-transparent z-20">
+                        <div class="w-16 h-16 rounded-full bg-zinc-800/50 flex items-center justify-center mb-4">
+                            <i class="fa-solid fa-chart-simple text-2xl opacity-50"></i>
+                        </div>
+                        <p class="text-sm font-medium">Belum ada data pengeluaran</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Assistant Section -->
+        <div class="glass-card rounded-3xl p-7 mb-10 border border-brand-500/20 relative overflow-hidden group">
+            <!-- Background Decoration -->
+            <div class="absolute -right-20 -top-20 w-64 h-64 bg-brand-600/10 rounded-full blur-3xl group-hover:bg-brand-500/20 transition-colors duration-700 pointer-events-none"></div>
+            
+            <div class="relative z-10">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-bold text-white tracking-tight">Asisten Keuangan AI</h2>
+                            <p class="text-xs text-zinc-400">Didukung oleh Gemini</p>
+                        </div>
+                    </div>
+                    <button id="btnAiAnalysis" class="bg-surfaceLight hover:bg-zinc-700 text-zinc-200 text-sm font-semibold py-2.5 px-5 rounded-xl transition-all border border-zinc-700 hover:border-brand-500/50 flex items-center gap-2 group/btn active:scale-95">
+                        <i class="fa-solid fa-robot group-hover/btn:text-brand-400 transition-colors"></i> Analisis Data Saya
+                    </button>
+                </div>
+                
+                <!-- Container untuk hasil AI -->
+                <div id="aiResultContainer" class="hidden mt-6 pt-6 border-t border-zinc-800/80">
+                    <!-- Loading State -->
+                    <div id="aiLoading" class="hidden flex items-center justify-center gap-3 text-zinc-400 py-4">
+                        <i class="fa-solid fa-circle-notch fa-spin text-brand-500 text-xl"></i>
+                        <span class="text-sm font-medium animate-pulse">Gemini sedang merumuskan wawasan keuangan Anda...</span>
+                    </div>
+                    
+                    <!-- Text Output -->
+                    <div id="aiText" class="text-sm text-zinc-300 leading-relaxed [&>p]:mb-3 [&>strong]:text-brand-300 [&>ul]:list-disc [&>ul]:pl-5 [&>ul>li]:mb-1">
+                        <!-- Konten dari AI akan dimuat di sini -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom: Daftar Riwayat Transaksi (Full Width, Modern List) -->
+        <div class="glass-card rounded-3xl shadow-xl overflow-hidden mb-8">
+            <div class="p-7 border-b border-zinc-800/80 flex justify-between items-center bg-zinc-900/30">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-blue-400">
+                        <i class="fa-solid fa-list-ul"></i>
+                    </div>
+                    <h2 class="text-lg font-bold text-white">Semua Transaksi</h2>
+                </div>
+                <span class="text-xs font-semibold text-zinc-500 bg-zinc-800 px-3 py-1 rounded-full" id="trxCount">0 Data</span>
+            </div>
+            
+            <div class="p-4 sm:p-7 bg-zinc-900/10">
+                <!-- List Container -->
+                <div id="transactionList" class="flex flex-col gap-3">
+                    <!-- Data dirender melalui JS -->
+                </div>
+                
+                <!-- Empty State List -->
+                <div id="tableEmptyState" class="hidden flex-col items-center justify-center py-16 text-zinc-500">
+                    <div class="w-20 h-20 rounded-full bg-zinc-800/50 flex items-center justify-center mb-4">
+                        <i class="fa-solid fa-receipt text-3xl opacity-30"></i>
+                    </div>
+                    <p class="font-medium text-zinc-400">Dompet masih bersih</p>
+                    <p class="text-sm mt-1">Belum ada riwayat transaksi tercatat.</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer simple -->
+        <div class="text-center text-xs text-zinc-600 pb-4">
+            &copy; <span id="currentYear"></span> Dompetku App. Dirancang dengan minimalis.
+        </div>
+    </div>
+
+    <script>
+        // Set tahun footer
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+
+        // Kategori Default beserta Ikon bawaannya
+        const categoriesData = {
+            income: [
+                { name: "Gaji", icon: "fa-money-bill-wave" },
+                { name: "Bonus", icon: "fa-gift" },
+                { name: "Investasi", icon: "fa-chart-line" },
+                { name: "Lainnya", icon: "fa-plus-circle" }
+            ],
+            expense: [
+                { name: "Makanan", icon: "fa-burger" },
+                { name: "Transportasi", icon: "fa-car" },
+                { name: "Tagihan", icon: "fa-file-invoice-dollar" },
+                { name: "Belanja", icon: "fa-bag-shopping" },
+                { name: "Hiburan", icon: "fa-gamepad" },
+                { name: "Kesehatan", icon: "fa-notes-medical" },
+                { name: "Lainnya", icon: "fa-minus-circle" }
+            ]
+        };
+
+        // State Aplikasi (Sekarang dari Firebase)
+        let transactions = [];
+        let expenseChartInstance = null;
+
+        // Fungsi Global untuk dipanggil dari modul Firebase
+        window.updateStateFromFirebase = function(newData) {
+            transactions = newData;
+            updateDashboard();
+        }
+
+        window.showAppError = function(msg) {
+            showError(msg);
+        }
+
+        // Inisialisasi Aplikasi UI
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('date').valueAsDate = new Date(); // Set tgl hari ini
+            
+            // Tampilan tanggal di Navbar
+            const options = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' };
+            document.getElementById('currentDateDisplay').textContent = new Date().toLocaleDateString('id-ID', options);
+
+            updateCategoryOptions();
+            
+            // Hapus updateDashboard() dari sini karena sekarang menunggu data dari Firebase
+            // updateDashboard();
+
+            // TAMBAHKAN DISINI: Format input nominal otomatis pakai titik saat mengetik
+            const amountInput = document.getElementById('amount');
+            amountInput.addEventListener('input', function(e) {
+                // Hapus semua karakter selain angka
+                let value = this.value.replace(/\D/g, '');
+                
+                // Format dengan titik sebagai pemisah ribuan
+                if (value !== '') {
+                    this.value = value.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                } else {
+                    this.value = '';
+                }
+            });
+
+            // Event Listener Form
+            document.getElementById('transactionForm').addEventListener('submit', addTransaction);
+        });
+
+        // Update opsi dropdown
+        function updateCategoryOptions() {
+            const type = document.querySelector('input[name="type"]:checked').value;
+            const categorySelect = document.getElementById('category');
+            categorySelect.innerHTML = ''; 
+
+            const options = type === 'Pemasukan' ? categoriesData.income : categoriesData.expense;
+            
+            options.forEach(cat => {
+                const optionElement = document.createElement('option');
+                optionElement.value = cat.name;
+                optionElement.textContent = cat.name;
+                categorySelect.appendChild(optionElement);
+            });
+        }
+
+        // Format angka ke Rupiah
+        function formatRupiah(number) {
+            return new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(number);
+        }
+
+        // Format Tanggal 
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+
+        // Helper cari ikon kategori
+        function getCategoryIcon(type, categoryName) {
+            const group = type === 'Pemasukan' ? categoriesData.income : categoriesData.expense;
+            const found = group.find(c => c.name === categoryName);
+            return found ? found.icon : 'fa-circle-dot';
+        }
+
+        // Menampilkan pesan error UI (menggantikan alert)
+        function showError(message) {
+            const errDiv = document.getElementById('errorMessage');
+            document.getElementById('errorText').textContent = message;
+            errDiv.classList.remove('hidden');
+            setTimeout(() => {
+                errDiv.classList.add('hidden');
+            }, 3000);
+        }
+
+        // Logout
+        function handleLogout() {
+            // PERBAIKAN: Tangani proses logout secara manual jika sedang menggunakan Mode Demo
+            if (window.currentUserId === "demo-guest") {
+                window.currentUserId = null;
+                
+                // Tampilkan kembali layar Auth, sembunyikan aplikasi utama
+                document.getElementById('authScreen').classList.remove('hidden');
+                document.getElementById('mainApp').classList.add('hidden');
+                
+                // Reset status tombol login
+                const btn = document.getElementById('btnGoogleLogin');
+                const btnDemo = document.getElementById('btnDemoLogin');
+                const loading = document.getElementById('loginLoading');
+                
+                if (btn) btn.classList.remove('hidden');
+                if (btnDemo) btnDemo.classList.remove('hidden');
+                if (loading) {
+                    loading.classList.add('hidden');
+                    loading.classList.remove('flex');
+                }
+                return;
+            }
+
+            // Proses logout normal jika login menggunakan Google
+            if(window.signOutAuth) {
+                window.signOutAuth().then(() => {
+                    // Berhasil logout, layar berpindah otomatis
+                }).catch(err => {
+                    showError("Gagal keluar dari akun Google.");
+                });
+            }
+        }
+
+        // Tambah Transaksi (Menyimpan ke Firebase)
+        async function addTransaction(e) {
+            e.preventDefault();
+
+            // Cek Auth
+            if (!window.currentUserId || !window.firebaseDB) {
+                showError("Gagal menyimpan. Anda belum terautentikasi.");
+                return;
+            }
+
+            const type = document.querySelector('input[name="type"]:checked').value;
+            
+            // Ambil nilai input teks, bersihkan titiknya, lalu ubah ke format angka riil
+            const amountStr = document.getElementById('amount').value;
+            const amount = parseFloat(amountStr.replace(/\./g, '')); 
+            
+            const category = document.getElementById('category').value;
+            const date = document.getElementById('date').value;
+            let note = document.getElementById('note').value.trim();
+
+            if (!amount || amount <= 0 || !date || !category) {
+                showError("Nominal, Kategori, dan Tanggal wajib diisi dengan benar.");
+                return;
+            }
+            
+            if(!note) note = category; // Fallback jika catatan kosong
+
+            const transactionData = {
+                type,
+                amount,
+                category,
+                date,
+                note,
+                createdAt: Date.now() // Untuk sorting
+            };
+
+            // Nonaktifkan tombol sementara
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Menyimpan...';
+            submitBtn.classList.add('opacity-70');
+
+            try {
+                // Simpan ke Firestore di path private user
+                const userRef = window.collection(window.firebaseDB, 'artifacts', window.appId, 'users', window.currentUserId, 'transactions');
+                await window.addDoc(userRef, transactionData);
+                
+                // Reset input form
+                document.getElementById('amount').value = '';
+                document.getElementById('note').value = '';
+                // (Tidak perlu panggil updateDashboard() manual, real-time listener akan terpicu)
+
+            } catch (error) {
+                console.error("Error adding doc:", error);
+                showError("Gagal menyimpan transaksi ke server.");
+            } finally {
+                // Kembalikan tombol
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+                submitBtn.classList.remove('opacity-70');
+            }
+        }
+
+        // Hapus Transaksi (Hapus dari Firebase)
+        async function deleteTransaction(id) {
+            if (!window.currentUserId) return;
+            
+            // Bypass hapus lokal jika di Mode Demo
+            if (window.currentUserId === "demo-guest") {
+                if (window._demoDelete) window._demoDelete(id);
+                return;
+            }
+            
+            if (!window.firebaseDB) return;
+            
+            try {
+                 const docRef = window.doc(window.firebaseDB, 'artifacts', window.appId, 'users', window.currentUserId, 'transactions', id.toString());
+                 await window.deleteDoc(docRef);
+                 // Real-time listener akan otomatis mengupdate UI
+            } catch (error) {
+                 console.error("Error deleting doc:", error);
+                 showError("Gagal menghapus transaksi.");
+            }
+        }
+
+        function updateDashboard() {
+            let totalIncome = 0;
+            let totalExpense = 0;
+
+            transactions.forEach(trx => {
+                if (trx.type === 'Pemasukan') totalIncome += trx.amount;
+                if (trx.type === 'Pengeluaran') totalExpense += trx.amount;
+            });
+
+            const totalBalance = totalIncome - totalExpense;
+
+            // Update Cards
+            document.getElementById('totalBalance').textContent = formatRupiah(totalBalance);
+            document.getElementById('totalIncome').textContent = formatRupiah(totalIncome);
+            document.getElementById('totalExpense').textContent = formatRupiah(totalExpense);
+
+            // Update Badge Count
+            document.getElementById('trxCount').textContent = `${transactions.length} Data`;
+
+            renderHistoryList();
+            updateChart();
+        }
+
+        function renderHistoryList() {
+            const listContainer = document.getElementById('transactionList');
+            const emptyState = document.getElementById('tableEmptyState');
+            
+            listContainer.innerHTML = '';
+
+            if (transactions.length === 0) {
+                emptyState.classList.remove('hidden');
+                emptyState.classList.add('flex');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+                emptyState.classList.remove('flex');
+            }
+
+            transactions.forEach((trx, index) => {
+                const isIncome = trx.type === 'Pemasukan';
+                const amountColor = isIncome ? 'text-emerald-400' : 'text-rose-400';
+                const amountSign = isIncome ? '+' : '-';
+                const iconClass = getCategoryIcon(trx.type, trx.category);
+                
+                // Styling warna ikon berdasarkan tipe
+                const iconBg = isIncome ? 'bg-emerald-500/10' : 'bg-rose-500/10';
+                const iconTextColor = isIncome ? 'text-emerald-400' : 'text-rose-400';
+
+                // Animasi beruntun halus
+                const delay = Math.min(index * 50, 500); 
+
+                const item = document.createElement('div');
+                item.className = `flex items-center justify-between p-4 bg-surfaceLight/40 hover:bg-surfaceLight border border-transparent hover:border-zinc-700/50 rounded-2xl transition-all duration-300 group opacity-0 animate-slide-up`;
+                item.style.animationDelay = `${delay}ms`;
+                
+                item.innerHTML = `
+                    <div class="flex items-center gap-4 overflow-hidden">
+                        <div class="w-12 h-12 rounded-xl flex-shrink-0 ${iconBg} ${iconTextColor} flex items-center justify-center shadow-inner">
+                            <i class="fa-solid ${iconClass} text-lg"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <h4 class="text-sm font-semibold text-zinc-100 truncate mb-1">${trx.note}</h4>
+                            <div class="flex items-center text-xs text-zinc-500 gap-2">
+                                <span>${formatDate(trx.date)}</span>
+                                <span class="w-1 h-1 rounded-full bg-zinc-700"></span>
+                                <span class="bg-zinc-800 px-2 py-0.5 rounded-md text-zinc-400">${trx.category}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 pl-2 flex-shrink-0">
+                        <div class="text-right">
+                            <span class="block text-sm font-bold ${amountColor} whitespace-nowrap">
+                                ${amountSign} ${formatRupiah(trx.amount)}
+                            </span>
+                        </div>
+                        <button onclick="deleteTransaction('${trx.id}')" class="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:text-white hover:bg-rose-500 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500/50 opacity-100 sm:opacity-0 group-hover:opacity-100" title="Hapus Data">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        function updateChart() {
+            const expenses = transactions.filter(trx => trx.type === 'Pengeluaran');
+            const emptyState = document.getElementById('chartEmptyState');
+            const canvasContainer = document.getElementById('expenseChart');
+            
+            if (expenses.length === 0) {
+                emptyState.classList.remove('hidden');
+                canvasContainer.style.opacity = '0';
+                if (expenseChartInstance) {
+                    expenseChartInstance.destroy();
+                    expenseChartInstance = null;
+                }
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+                canvasContainer.style.opacity = '1';
+            }
+
+            const expenseByCategory = {};
+            expenses.forEach(trx => {
+                expenseByCategory[trx.category] = (expenseByCategory[trx.category] || 0) + trx.amount;
+            });
+
+            const labels = Object.keys(expenseByCategory);
+            const data = Object.values(expenseByCategory);
+
+            // Palet warna yang lebih modern & nyambung dengan dark mode
+            const bgColors = [
+                '#f43f5e', // rose
+                '#8b5cf6', // violet
+                '#0ea5e9', // sky
+                '#10b981', // emerald
+                '#f59e0b', // amber
+                '#d946ef', // fuchsia
+                '#64748b'  // slate
+            ];
+
+            const ctx = document.getElementById('expenseChart').getContext('2d');
+
+            if (expenseChartInstance) {
+                expenseChartInstance.destroy();
+            }
+
+            Chart.defaults.color = '#a1a1aa'; // zinc-400
+            Chart.defaults.font.family = '"Plus Jakarta Sans", sans-serif';
+
+            expenseChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: bgColors,
+                        borderWidth: 4,
+                        borderColor: '#18181b', // Warna surface untuk efek pemisah
+                        hoverOffset: 8,
+                        borderRadius: 4 // Ujung grafik agak membulat
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%', // Cincin sangat tipis ala premium fintech
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 24,
+                                usePointStyle: true,
+                                pointStyle: 'circle',
+                                font: { size: 12, weight: '500' }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(9, 9, 11, 0.95)', // zinc-950
+                            titleColor: '#ffffff',
+                            bodyColor: '#d4d4d8', // zinc-300
+                            borderColor: '#3f3f46',
+                            borderWidth: 1,
+                            padding: 16,
+                            cornerRadius: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + formatRupiah(context.raw);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Integrasi Gemini API
+        document.getElementById('btnAiAnalysis').addEventListener('click', generateAiAnalysis);
+
+        async function generateAiAnalysis() {
+            const btn = document.getElementById('btnAiAnalysis');
+            const container = document.getElementById('aiResultContainer');
+            const loading = document.getElementById('aiLoading');
+            const textDiv = document.getElementById('aiText');
+
+            if (transactions.length === 0) {
+                showError("Tidak cukup data. Tambahkan beberapa transaksi terlebih dahulu.");
+                return;
+            }
+
+            // Ubah UI menjadi status Loading
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+            container.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            loading.classList.add('flex');
+            textDiv.innerHTML = '';
+
+            // Siapkan data untuk diberikan kepada AI
+            let totalIncome = 0;
+            let totalExpense = 0;
+            const expenseByCategory = {};
+
+            transactions.forEach(trx => {
+                if (trx.type === 'Pemasukan') totalIncome += trx.amount;
+                if (trx.type === 'Pengeluaran') {
+                    totalExpense += trx.amount;
+                    expenseByCategory[trx.category] = (expenseByCategory[trx.category] || 0) + trx.amount;
+                }
+            });
+
+            // Susun detail kategori pengeluaran
+            let categoryDetails = "Tidak ada pengeluaran yang tercatat.";
+            if (Object.keys(expenseByCategory).length > 0) {
+                 categoryDetails = Object.entries(expenseByCategory)
+                    .map(([cat, amt]) => `- ${cat}: Rp ${amt.toLocaleString('id-ID')}`)
+                    .join("\n");
+            }
+
+            // Buat Prompt (Instruksi Tugas)
+            const prompt = `Berikut adalah data ringkasan keuangan pribadi pengguna bulan ini:
+Total Pemasukan: Rp ${totalIncome.toLocaleString('id-ID')}
+Total Pengeluaran: Rp ${totalExpense.toLocaleString('id-ID')}
+Saldo Tersisa: Rp ${(totalIncome - totalExpense).toLocaleString('id-ID')}
+
+Rincian Pengeluaran berdasarkan kategori:
+${categoryDetails}
+
+Tugas Anda:
+1. Berikan komentar singkat tentang kondisi keuangan (misal: apakah rasio pemasukan vs pengeluaran sehat?).
+2. Perhatikan rincian pengeluaran, cari kategori dengan pengeluaran terbesar atau tidak wajar.
+3. Berikan satu saran/tips berhemat yang sangat spesifik dan praktis berdasarkan data tersebut.
+
+Format Output:
+Gunakan bahasa Indonesia yang santai, memotivasi, dan layaknya seorang konsultan keuangan ramah. 
+Wajib kembalikan format dalam tag HTML murni (gunakan <p> untuk paragraf, <strong> untuk teks tebal, <ul><li> untuk daftar jika perlu). Jangan gunakan blok kode markdown (\`\`\`).`;
+
+            // Buat System Instruction (Persona LLM)
+            const systemPrompt = "Anda adalah penasihat keuangan cerdas yang tertanam di dalam aplikasi bernama Dompetku. Tujuan Anda adalah membantu pengguna mencapai kesehatan finansial dengan menganalisis angka pengeluaran mereka secara objektif namun tetap ramah.";
+
+            // Siapkan Payload untuk API
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            const apiKey = ""; // Kunci API disediakan otomatis oleh lingkungan editor
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+            try {
+                // Panggil API Gemini
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error("Network response was not ok");
+
+                const result = await response.json();
+                
+                // Ekstrak teks balasan dan tampilkan
+                if (result.candidates && result.candidates[0].content.parts[0].text) {
+                    textDiv.innerHTML = result.candidates[0].content.parts[0].text;
+                } else {
+                    textDiv.innerHTML = "<p class='text-rose-400'><i class='fa-solid fa-triangle-exclamation mr-2'></i> Maaf, format balasan AI tidak sesuai ekspektasi. Coba lagi.</p>";
+                }
+
+            } catch (error) {
+                console.error("AI Error:", error);
+                textDiv.innerHTML = "<p class='text-rose-400'><i class='fa-solid fa-link-slash mr-2'></i> Gagal memproses analisis. Pastikan fitur AI diaktifkan atau coba beberapa saat lagi.</p>";
+            } finally {
+                // Kembalikan UI ke status normal
+                loading.classList.add('hidden');
+                loading.classList.remove('flex');
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+    </script>
+</body>
+</html>
